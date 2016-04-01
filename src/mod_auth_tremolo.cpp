@@ -27,6 +27,9 @@ limitations under the License.
 #include <http_config.h>
 #include <http_core.h>
 #include <http_log.h>
+
+
+
 #include <http_protocol.h>
 #include <http_request.h>
 #include <ap_provider.h>
@@ -49,6 +52,15 @@ using namespace Json;
 using namespace boost::gregorian;
 using namespace boost::posix_time;
 namespace bt = boost::posix_time;
+
+
+
+#ifdef APLOG_USE_MODULE
+extern "C" module AP_MODULE_DECLARE_DATA auth_tremolo_module;
+APLOG_USE_MODULE(auth_tremolo);
+#endif
+
+
 
 static const std::string base64_chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 	"abcdefghijklmnopqrstuvwxyz"
@@ -233,7 +245,7 @@ static int last_mile(auth_tremolo_config_rec *conf, const char *decodedToken,
 	const char *isAuthd = apr_table_get(r->subprocess_env, "TREMOLO_REQ_AUTHD");
     const char *isAuthdRedir = apr_table_get(r->subprocess_env, "REDIRECT_TREMOLO_REQ_AUTHD");
 
-
+	bool alreadyProcessed = false;
 
 	if (isAuthd == NULL && isAuthdRedir == NULL) {
 		ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "Request not processed yet");
@@ -241,7 +253,7 @@ static int last_mile(auth_tremolo_config_rec *conf, const char *decodedToken,
 
 	if ((isAuthd != NULL && strcmp(isAuthd,"true") == 0) || (isAuthdRedir != NULL && strcmp(isAuthdRedir,"true") == 0)) {
 		ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "Request already authenticated");
-		return OK;
+		alreadyProcessed = true;
 	}
 
 
@@ -346,7 +358,7 @@ static int last_mile(auth_tremolo_config_rec *conf, const char *decodedToken,
 
 	ptime utc_now = second_clock::universal_time();
 
-	if (!((notBefore < utc_now) && (utc_now < notAfter))) {
+	if (  !((notBefore < utc_now) && (utc_now < notAfter))  && ! alreadyProcessed   ) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "Time Check Failed",
 				requestToken.c_str());
 		return DECLINED;
@@ -360,7 +372,7 @@ static int last_mile(auth_tremolo_config_rec *conf, const char *decodedToken,
 
 				apr_table_do(iterate_func, r, r->subprocess_env, NULL);*/
 
-		if (preReWrite == NULL || strcmp(root.get("uri", "").asCString(),preReWrite) != 0) {
+		if (! alreadyProcessed && (preReWrite == NULL || strcmp(root.get("uri", "").asCString(),preReWrite) != 0) ) {
 			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "URI Check Failed '%s'",
 							r->uri);
 
@@ -496,6 +508,7 @@ static void register_hooks(apr_pool_t *p) {
 			APR_HOOK_MIDDLE);
 }
 
+
 extern "C" {
 module AP_MODULE_DECLARE_DATA auth_tremolo_module = { STANDARD20_MODULE_STUFF,
 		create_auth_tremolo_dir_config								, /* dir config creater */
@@ -506,4 +519,3 @@ module AP_MODULE_DECLARE_DATA auth_tremolo_module = { STANDARD20_MODULE_STUFF,
 register_hooks /* register hooks */
 };
 }
-
